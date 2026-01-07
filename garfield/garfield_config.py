@@ -34,7 +34,8 @@ garfield_method = MethodSpecification(
         mixed_precision=False,
         pipeline=GarfieldPipelineConfig(
             datamanager=GarfieldDataManagerConfig(
-                dataparser=NerfstudioDataParserConfig(train_split_fraction=0.99),
+                # CHECK : train_split_fraction should be 0.1
+                dataparser=NerfstudioDataParserConfig(train_split_fraction=0.2),
                 train_num_rays_per_batch=4096,
                 eval_num_rays_per_batch=4096,
                 pixel_sampler=GarfieldPixelSamplerConfig(

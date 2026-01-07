@@ -14,7 +14,6 @@ from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.base_field import Field
 from torch import nn
 from torch.nn.parameter import Parameter
-from torchtyping import TensorType
 
 try:
     import tinycudann as tcnn
@@ -48,7 +47,7 @@ class GarfieldFieldConfig(InstantiateConfig):
 
 
 class GarfieldField(Field):
-    quantile_transformer: Callable[[TensorType], TensorType]
+    quantile_transformer: Callable[[torch.Tensor], torch.Tensor]
     config: GarfieldFieldConfig
 
     def __init__(
@@ -111,14 +110,14 @@ class GarfieldField(Field):
         )
         return enc
 
-    def get_outputs(self, ray_samples: RaySamples) -> Dict[FieldHeadNames, TensorType]:
+    def get_outputs(self, ray_samples: RaySamples) -> Dict[FieldHeadNames, torch.Tensor]:
         """
         This function is not supported for GARField -- please use get_hash and get_mlp instead.
         get_mlp assumes that hash values are normalized, which requires the renderer (in the model).
         """
         raise NotImplementedError
 
-    def get_hash(self, ray_samples: RaySamples) -> TensorType:
+    def get_hash(self, ray_samples: RaySamples) -> torch.Tensor:
         """Get the hashgrid encoding. Note that this function does *not* normalize the hash values."""
         positions = ray_samples.frustums.get_positions().detach()
         positions = self.spatial_distortion(positions)
@@ -129,7 +128,7 @@ class GarfieldField(Field):
         hash = x.view(*ray_samples.frustums.shape, -1)
         return hash
 
-    def get_mlp(self, hash: TensorType, instance_scales: TensorType) -> TensorType:
+    def get_mlp(self, hash: torch.Tensor, instance_scales: torch.Tensor) -> torch.Tensor:
         """
         Get the GARField affinity field outputs. Note that this is scale-conditioned.
         This function *does* assume that the hash values are normalized.
@@ -139,7 +138,7 @@ class GarfieldField(Field):
 
         # Check that # of rays is the same as # of scales
         assert hash.shape[0] == instance_scales.shape[0]
-
+        
         epsilon = 1e-5
         if self.use_single_scale:
             instance_pass = self.instance_net(hash)

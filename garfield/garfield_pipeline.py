@@ -1,6 +1,11 @@
 import typing
+import time
+import os
+import atexit
+import yaml
 from dataclasses import dataclass, field
 from typing import Literal, Type, Mapping, Any
+from pathlib import Path
 
 import torch
 from nerfstudio.pipelines.base_pipeline import VanillaPipeline, VanillaPipelineConfig
@@ -52,10 +57,60 @@ class GarfieldPipeline(VanillaPipeline):
             local_rank,
             grad_scaler,
         )
+        
+        # Initialize training metrics tracking
+        if test_mode != "inference" and local_rank == 0:
+            self._training_start_time = time.time()
+            self._max_gpu_memory_mb = 0.0
+            self._results_saved = False
+            self._max_num_iterations = None  # Will be set when we know it
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+            
+            # Register exit handler to save results when program exits
+            # This ensures results are saved even if training is interrupted
+            atexit.register(self._save_results_on_exit)
 
     def get_train_loss_dict(self, step: int):
         """In addition to the base class, we also calculate SAM masks
         and their 3D scales at `start_grouping_step`."""
+
+        # Track GPU memory usage from cursor
+        if hasattr(self, '_training_start_time') and torch.cuda.is_available():
+            current_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)  # Convert to MB
+            self._max_gpu_memory_mb = max(self._max_gpu_memory_mb, current_memory_mb)
+        
+        # Try to get max_num_iterations from config if available
+        # This is a workaround since we don't have direct access to TrainerConfig
+        if hasattr(self, '_training_start_time') and self._max_num_iterations is None:
+            # Try to find max_num_iterations from saved config.yml
+            try:
+                outputs_dir = Path("outputs")
+                if outputs_dir.exists():
+                    config_files = list(outputs_dir.rglob("config.yml"))
+                    if config_files:
+                        config_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                        with open(config_files[0], 'r') as f:
+                            config = yaml.safe_load(f)
+                            if 'max_num_iterations' in config:
+                                self._max_num_iterations = config['max_num_iterations']
+            except:
+                pass
+        
+        # Save results when we reach the last step
+        if (hasattr(self, '_training_start_time') and 
+            not self._results_saved):
+            # If we know max_num_iterations, check if we're at the end
+            if self._max_num_iterations is not None:
+                if step >= self._max_num_iterations - 1:
+                    self.save_training_results(self._max_num_iterations)
+                    self._results_saved = True
+            # Otherwise, save periodically as backup (will be overwritten by final save)
+            elif step % 1000 == 0:
+                # Use current step as estimate if we don't know max_num_iterations
+                self.save_training_results(step + 1)
+        
+        ### to cursor
         if step == self.config.start_grouping_step:
             loaded = self.datamanager.load_sam_data()
             if not loaded:
@@ -184,3 +239,78 @@ class GarfieldPipeline(VanillaPipeline):
             ).to(scales.device)
 
         return quantile_transformer_func
+        
+    #fron cursor
+    def save_training_results(self, max_num_iterations: int):
+        """
+        Save training results (max GPU memory and total training time) to results.txt
+        This should be called when training is complete.
+        """
+        if not hasattr(self, '_training_start_time'):
+            return
+        
+        try:
+            # Calculate total training time
+            total_time_seconds = time.time() - self._training_start_time
+            hours = int(total_time_seconds // 3600)
+            minutes = int((total_time_seconds % 3600) // 60)
+            seconds = int(total_time_seconds % 60)
+            
+            # Get max GPU memory
+            max_memory_gb = self._max_gpu_memory_mb / 1024.0 if torch.cuda.is_available() else 0.0
+            
+            # Find output directory (where config.yml is saved)
+            output_dir = None
+            outputs_dir = Path("outputs")
+            
+            if outputs_dir.exists():
+                # Find the most recently created config.yml file
+                config_files = list(outputs_dir.rglob("config.yml"))
+                if config_files:
+                    config_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                    output_dir = config_files[0].parent
+            
+            # Fallback: use data name if available
+            if output_dir is None:
+                if hasattr(self, 'datamanager') and hasattr(self.datamanager, 'config'):
+                    try:
+                        data_name = self.datamanager.config.dataparser.data.name
+                        output_dir = Path("outputs") / data_name / "garfield"
+                        # Try to find the most recent run directory
+                        if output_dir.exists():
+                            run_dirs = [d for d in output_dir.iterdir() if d.is_dir()]
+                            if run_dirs:
+                                run_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                                output_dir = run_dirs[0]
+                    except:
+                        output_dir = Path("outputs")
+                else:
+                    output_dir = Path("outputs")
+            
+            # Create output directory if it doesn't exist
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Write results to file
+            results_path = output_dir / "results.txt"
+            with open(results_path, "w") as f:
+                f.write("Training Results\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Total Training Time: {hours:02d}:{minutes:02d}:{seconds:02d}\n")
+                f.write(f"Total Training Time (seconds): {total_time_seconds:.2f}\n")
+                if torch.cuda.is_available():
+                    f.write(f"Max GPU Memory: {max_memory_gb:.2f} GB ({self._max_gpu_memory_mb:.2f} MB)\n")
+                else:
+                    f.write("Max GPU Memory: N/A (CUDA not available)\n")
+                f.write(f"Total Iterations: {max_num_iterations}\n")
+                f.write(f"Average Time per Iteration: {total_time_seconds / max_num_iterations:.4f} seconds\n")
+            
+            print(f"[GARField] Training results saved to {results_path}")
+        except Exception as e:
+            print(f"[GARField] Warning: Could not save training results: {e}")
+    
+    def _save_results_on_exit(self):
+        """Save results when program exits (called by atexit)"""
+        if hasattr(self, '_training_start_time') and not self._results_saved:
+            # Use current step as max_num_iterations if we don't know it
+            max_iter = self._max_num_iterations if self._max_num_iterations is not None else 0
+            self.save_training_results(max_iter)

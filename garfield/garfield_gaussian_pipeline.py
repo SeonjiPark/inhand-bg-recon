@@ -1,7 +1,6 @@
 import typing
 from dataclasses import dataclass, field
 from typing import Literal, Type, Mapping, Any, Optional, List, Dict
-from torchtyping import TensorType
 from pathlib import Path
 import trimesh
 import viser
@@ -79,12 +78,12 @@ class GarfieldGaussianPipeline(VanillaPipeline):
     """
     model: SplatfactoModel
     garfield_pipeline: List[GarfieldPipeline]  # To avoid importing Viewer* from nerf pipeline
-    state_stack: List[Dict[str, TensorType]]  # To revert to previous state
-    click_location: Optional[TensorType]  # For storing click location
+    state_stack: List[Dict[str, torch.Tensor]]  # To revert to previous state
+    click_location: Optional[torch.Tensor]  # For storing click location
     click_handle: Optional[viser.GlbHandle]  # For storing click handle
-    crop_group_list: List[TensorType]  # For storing gaussian crops (based on click point)
+    crop_group_list: List[torch.Tensor]  # For storing gaussian crops (based on click point)
     crop_transform_handle: Optional[viser.TransformControlsHandle]  # For storing scene transform handle -- drag!
-    cluster_labels: Optional[TensorType]  # For storing cluster labels
+    cluster_labels: Optional[torch.Tensor]  # For storing cluster labels
 
     def __init__(
         self,

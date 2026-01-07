@@ -6,7 +6,6 @@ import torch.nn as nn
 from torch.nn import Parameter
 import trimesh
 import numpy as np
-from torchtyping import TensorType
 
 import torch
 import torch.nn.functional as F
@@ -29,9 +28,9 @@ class FeatureRenderer(nn.Module):
     @classmethod
     def forward(
         cls,
-        embeds: TensorType["bs":..., "num_samples", "num_classes"],
-        weights: TensorType["bs":..., "num_samples", 1],
-    ) -> TensorType["bs":..., "num_classes"]:
+        embeds: torch.Tensor,
+        weights: torch.Tensor,
+    ) -> torch.Tensor:
         """Calculate semantics along the ray."""
         output = torch.sum(weights * embeds, dim=-2)
         output = output / torch.linalg.norm(output, dim=-1, keepdim=True)
@@ -76,7 +75,7 @@ class GarfieldModel(NerfactoModel):
             model_handle=[self]
             )
 
-    def get_outputs(self, ray_bundle: RayBundle) -> Dict[str, TensorType]:
+    def get_outputs(self, ray_bundle: RayBundle) -> Dict[str, torch.Tensor]:
         outputs = super().get_outputs(ray_bundle)
 
         if self.grouping_field.quantile_transformer is None:
@@ -138,6 +137,13 @@ class GarfieldModel(NerfactoModel):
             outputs["instance_hash"] = hash_rendered  # normalized!
         outputs["instance"] = self.grouping_field.get_mlp(hash_rendered, instance_scales).float()
 
+        # Store 3D positions for click-based interactions (only in eval mode to save memory)
+        if not self.training:
+            # Store all ray sample positions for point cloud extraction
+            all_positions = ray_samples.frustums.get_positions().detach()  # [num_rays, num_samples, 3]
+            outputs["ray_sample_positions"] = all_positions
+            outputs["ray_sample_weights"] = weights.detach()  # [num_rays, num_samples]
+
         # If a click point is available, calculate the affinity between the click point and the scene.
         click_output = self.click_scene.get_outputs(outputs)
         if click_output is not None:
@@ -146,7 +152,7 @@ class GarfieldModel(NerfactoModel):
         return outputs
 
     @torch.no_grad()
-    def get_grouping_at_points(self, positions: TensorType, scale: float) -> TensorType:
+    def get_grouping_at_points(self, positions: torch.Tensor, scale: float) -> torch.Tensor:
         """Get the grouping features at a set of points, given a scale."""
         # Apply distortion, calculate hash values, then normalize
         positions = self.grouping_field.spatial_distortion(positions)

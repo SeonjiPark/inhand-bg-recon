@@ -95,6 +95,7 @@ class GarfieldDataManager(VanillaDataManager):  # pylint: disable=abstract-metho
             pixel_level_keys_list, scales_3d_list, group_cdf_list = [], [], []
 
             num_entries = len(sam_data["pixel_level_keys"].keys())
+            # print(f"num_entries: {num_entries}")
             for i in range(num_entries):
                 pixel_level_keys_list.append(
                     torch.from_numpy(sam_data["pixel_level_keys"][str(i)][...])
