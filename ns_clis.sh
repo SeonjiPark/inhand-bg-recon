@@ -1,22 +1,27 @@
-# viser
+# # viser
+ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.9 --viewer.quit-on-train-completion True
 ns-viewer --load-config outputs/<experiment-name>/<method-name>/<run-name>/config.yml
 
-# garfield with custom train_split_fraction
-ns-train garfield --data /your/data/here --pipeline.datamanager.dataparser.train_split_fraction 0.9
-
-# train_split_fraction과 다른 설정을 함께 변경
-ns-train garfield --data ./datasets/office \
-  --pipeline.datamanager.dataparser.train_split_fraction 0.9 \
-  --pipeline.datamanager.train_num_rays_per_batch 8192
-
-ns-train garfield-gauss --data /your/data/here --pipeline.garfield-ckpt outputs/your/data/garfield/.../config.yml
-
-ns-export pointcloud --load-config outputs/hand_hand/garfield/2025-12-23_135447/config.yml --output-dir outputs/hand_hand/garfield/2025-12-23_135447/exports/pcd/ --num-points 1000000 --remove-outliers True --normal-method open3d --save-world-frame False 
-ns-export poisson --load-config outputs/hand_hand/garfield/2025-12-23_135447/config.yml --output-dir outputs/hand_hand/garfield/2025-12-23_135447/exports/mesh/ --target-num-faces 50000 --num-pixels-per-side 2048 --num-points 1000000 --remove-outliers True --normal-method open3d 
-
-ns-train garfield-gauss --data ./datasets/lerf/dozer_nerfgun_waldo \
---pipeline.garfield-ckpt outputs/dozer_nerfgun_waldo/garfield/2025-12-19_174136/config.yml
+# ns-render camera-path --load-config outputs/office/garfield/2025-12-29_175148/config.yml --camera-path-filename /data/seonjipark/Research/garfield/datasets/office/camera_paths/2026-01-15-18-33-12.json --output-path renders/office/2026-01-15-18-33-12.mp4
+# ns-export pointcloud --load-config outputs/office/garfield/2025-12-29_175148/config.yml --output-dir exports/pcd/office_table --num-points 1000000 --remove-outliers True --normal-method open3d --save-world-frame False 
+# ns-export pointcloud --load-config outputs/office/garfield/2025-12-29_175148/config.yml --output-dir exports/pcd/office_table --num-points 1000000 --remove-outliers True --normal-method open3d --save-world-frame False 
 
 
-ns-export pointcloud --load-config outputs/office/garfield/2025-12-24_111027/config.yml --output-dir outputs/office/garfield/2025-12-24_111027/exports/pcd/ --num-points 1000000 --remove-outliers True --normal-method open3d --save-world-frame False 
-ns-export poisson --load-config outputs/office/garfield/2025-12-24_111027/config.yml --output-dir outputs/office/garfield/2025-12-24_111027/exports/mesh/ --target-num-faces 50000 --num-pixels-per-side 2048 --num-points 1000000 --remove-outliers True --normal-method open3d 
+# ns-train garfield --data ./datasets/lerf/dozer_nerfgun_waldo --pipeline.train_split_fraction 0.9
+# ns-train garfield --data ./datasets/lerf/dozer_nerfgun_waldo --pipeline.train_split_fraction 0.5 && \
+# ns-train garfield --data ./datasets/lerf/dozer_nerfgun_waldo --pipeline.train_split_fraction 0.1 --viewer.quit-on-train-complete true       
+# ns-train garfield --data ./datasets/office0 --pipeline.train_split_fraction 0.9 --viewer.quit-on-train-complete true
+# ns-train garfield --data ./datasets/office0 --pipeline.train_split_fraction 0.5 --pipeline.model.train_scheduling 2
+# ns-train garfield --data ./datasets/office0 --pipeline.train_split_fraction 0.1 --pipeline.model.train_scheduling 2
+
+# ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.1 --pipeline.model.train_scheduling 2 --viewer.quit-on-train-completion True
+# ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.5 --pipeline.model.train_scheduling 2 --viewer.quit-on-train-completion True
+
+# ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.1 --pipeline.model.train_scheduling 3 --viewer.quit-on-train-completion True
+# ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.1 --pipeline.model.train_scheduling 4 --viewer.quit-on-train-completion True
+# ns-train garfield --data ./datasets/hand_hand --pipeline.train_split_fraction 0.1 --pipeline.model.train_scheduling 5 --viewer.quit-on-train-completion True
+
+# ns-eval --load-config ./outputs/hand_hand/garfield2d/2026-01-27_175739/config.yml --output-path ./outputs/hand_hand/garfield2d/2026-01-27_175739/eval_results.json
+# ns-eval --load-config ./outputs/hand_hand/garfield2d/2026-01-27_185254/config.yml --output-path ./outputs/hand_hand/garfield2d/2026-01-27_185254/eval_results.json
+# ns-eval --load-config ./outputs/hand_hand/garfield2d/2026-01-27_192904ß/config.yml --output-path ./outputs/hand_hand/garfield2d/2026-01-27_192904/eval_results.json
+

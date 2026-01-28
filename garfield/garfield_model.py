@@ -51,6 +51,18 @@ class GarfieldModelConfig(NerfactoModelConfig):
     use_hierarchy_losses: bool = True
     use_single_scale: bool = False
     """For ablation only. For full GARField, keep hierarchy=True and single_scale=False."""
+    
+    train_scheduling: int = 0
+    """Enable progressive training scheduling that gradually enables hash channels based on training progress.
+    0: Disabled (skip scheduling)
+    1: Standard scheduling
+    2: Modified scheduling with offset"""
+    
+    density_camera_penalty_threshold: float = 0.1
+    """Distance threshold for density camera penalty loss. Samples closer than this to camera will be penalized."""
+    
+    density_camera_penalty_mult: float = 1.0
+    """Multiplier for density camera penalty loss."""
 
 
 class GarfieldModel(NerfactoModel):
@@ -87,8 +99,11 @@ class GarfieldModel(NerfactoModel):
         # If in training mode, `outputs` should already have calculated ray samples and weights.
         # Without this if-block, camera optimizer? gradients? seem to get messed up.
         ray_samples: RaySamples
+        field_outputs = None
         if self.training:
             ray_samples, weights = outputs["ray_samples_list"][-1], outputs["weights_list"][-1]
+            # Get field outputs for density penalty loss
+            field_outputs = self.field.forward(ray_samples, compute_normals=self.config.predict_normals)
         else:
             ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
             field_outputs = self.field.forward(ray_samples, compute_normals=self.config.predict_normals)
@@ -130,9 +145,45 @@ class GarfieldModel(NerfactoModel):
         # Calculate features for the scale-conditioned grouping field.
         # Hash values need to be included in the outputs for the loss calculation.
         hash = self.grouping_field.get_hash(grouping_samples)
+        
+        # Progressive training: gradually enable hash channels based on training progress
+
+        # print(f"hasattr(ray_bundle, 'metadata'): {hasattr(ray_bundle, 'metadata')}")
+        # print(f"ray_bundle.metadata is not None: {ray_bundle.metadata is not None}")
+        # print(f"step in ray_bundle.metadata: {'step' in ray_bundle.metadata}")
+        # print(f"max_num_iterations in ray_bundle.metadata: {'max_num_iterations' in ray_bundle.metadata}")
+        
+        if (self.config.train_scheduling > 0 and
+            self.training and 
+            hasattr(ray_bundle, "metadata") and 
+            ray_bundle.metadata is not None and
+            "step" in ray_bundle.metadata and 
+            "max_num_iterations" in ray_bundle.metadata):
+            current_iter = ray_bundle.metadata["step"]
+            total_iter = ray_bundle.metadata["max_num_iterations"]
+            r = current_iter / total_iter
+            if self.config.train_scheduling == 1:
+                t = int(min(1.0, (int(r * 4) + 1) / 4) * 192)
+            elif self.config.train_scheduling == 2:
+                t = int(min(1.0, (int(r * 4) + 1) / 4 + 0.5) * 192)
+            elif self.config.train_scheduling == 3:
+                t = int(max(0.5, (int(r * 16) + 1) / 16) * 192)
+            else:
+                t = hash.shape[-1]
+            
+            hash[:, :, t:] = 0
+        
         hash_rendered = self.renderer_feat(
             embeds=hash, weights=grouping_weights.detach().half()
         )
+        # print(f"hash_rendered.shape: {hash_rendered.shape}")
+        if (self.config.train_scheduling > 3 and self.training):
+            if self.config.train_scheduling == 4:
+                t = int(min(1.0, (int(r * 4) + 1) / 4) * 192)
+            elif self.config.train_scheduling == 5:
+                t = int(max(0.5, (int(r * 16) + 1) / 16) * 192)
+            hash_rendered[:, t:] = 0
+        
         if self.training:
             outputs["instance_hash"] = hash_rendered  # normalized!
         outputs["instance"] = self.grouping_field.get_mlp(hash_rendered, instance_scales).float()
@@ -143,6 +194,12 @@ class GarfieldModel(NerfactoModel):
             all_positions = ray_samples.frustums.get_positions().detach()  # [num_rays, num_samples, 3]
             outputs["ray_sample_positions"] = all_positions
             outputs["ray_sample_weights"] = weights.detach()  # [num_rays, num_samples]
+        
+        # Store camera origins and ray sample positions for density penalty loss
+        if self.training and field_outputs is not None:
+            outputs["camera_origins"] = ray_bundle.origins  # [num_rays, 3]
+            outputs["ray_sample_positions"] = ray_samples.frustums.get_positions()  # [num_rays, num_samples, 3]
+            outputs["ray_sample_density"] = field_outputs[FieldHeadNames.DENSITY]  # [num_rays, num_samples, 1]
 
         # If a click point is available, calculate the affinity between the click point and the scene.
         click_output = self.click_scene.get_outputs(outputs)
@@ -247,6 +304,27 @@ class GarfieldModel(NerfactoModel):
         total_loss += instance_loss_4
 
         loss_dict["instance_loss"] = total_loss / torch.sum(block_mask).float()
+
+        ####################################################################################
+        # Density penalty loss: penalize density near camera
+        ####################################################################################
+        if "camera_origins" in outputs and "ray_sample_positions" in outputs and "ray_sample_density" in outputs:
+            camera_origins = outputs["camera_origins"]  # [num_rays, 3]
+            ray_positions = outputs["ray_sample_positions"]  # [num_rays, num_samples, 3]
+            density = outputs["ray_sample_density"]  # [num_rays, num_samples, 1]
+            
+            # Expand camera origins to match ray_positions shape
+            camera_origins_expanded = camera_origins.unsqueeze(1)  # [num_rays, 1, 3]
+            
+            # Calculate distance from camera to each ray sample position
+            distances = torch.norm(ray_positions - camera_origins_expanded, dim=-1, keepdim=True)  # [num_rays, num_samples, 1]
+            
+            # Create mask for positions close to camera
+            close_to_camera = distances < self.config.density_camera_penalty_threshold  # [num_rays, num_samples, 1]
+            
+            # Penalize density values near camera (encourage them to be 0)
+            density_penalty = (density * close_to_camera.float()).abs()
+            loss_dict["density_camera_penalty"] = self.config.density_camera_penalty_mult * density_penalty.mean()
 
         return loss_dict
 

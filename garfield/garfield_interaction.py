@@ -56,6 +56,8 @@ class GarfieldClickScene(nn.Module):
         self.save_dir = Path("outputs/clicked_pointclouds")
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.click_count = 0
+        # File path for saving center coordinates
+        self.center_coords_file = self.save_dir / "center_coordinates.txt"
         # For cumulative average of object center
         self._accumulated_center = None  # Accumulated center sum
         self._center_count = 0  # Number of centers accumulated
@@ -250,6 +252,11 @@ class GarfieldClickScene(nn.Module):
                     if self._accumulated_center is not None:
                         self._visualize_center(self._accumulated_center)
                         print(f"cumulative_avg_center (count={self._center_count}): {self._accumulated_center}")
+                        center_world_coords = self._accumulated_center * VISER_NERFSTUDIO_SCALE_RATIO
+                        print(f"cumulative_avg_center in 3d world coords: {center_world_coords}")
+                        
+                        # Save coordinates to txt file
+                        self._save_center_coordinates(center_world_coords)
                         
                         # Apply inverse normalization process to accumulated_center
                         # Reverse process: (near_positions + 2.0) / 4.0 -> near_positions * 4.0 - 2.0
@@ -331,4 +338,19 @@ class GarfieldClickScene(nn.Module):
                 name=f"/selected_point_{i}", mesh=sphere_mesh
             )
             self._selected_points_handles.append(handle)
+    
+    def _save_center_coordinates(self, world_coords: np.ndarray):
+        """Save center coordinates to txt file. Overwrites existing file."""
+        try:
+            # Read existing file if it exists (to check format, but we'll overwrite)
+            # Format: x y z (space-separated, one line)
+            coords_str = f"{world_coords[0]:.6f} {world_coords[1]:.6f} {world_coords[2]:.6f}\n"
+            
+            # Write coordinates to file (overwrites if exists)
+            with open(self.center_coords_file, 'w') as f:
+                f.write(coords_str)
+            
+            print(f"Center coordinates saved to {self.center_coords_file}")
+        except Exception as e:
+            print(f"Warning: Could not save center coordinates: {e}")
         

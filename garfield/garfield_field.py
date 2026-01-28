@@ -71,7 +71,7 @@ class GarfieldField(Field):
                 for i in range(len(hashgrid_cfg["level"]))
             ]
         )
-        tot_out_dims = sum([e.n_output_dims for e in self.enc_list])
+        tot_out_dims = sum([e.n_output_dims for e in self.enc_list]) #tot_out_dims = 192
 
         # This is the MLP that takes the hashgrid encoding as input.
         # Note the +1 for the scale input.
@@ -124,6 +124,7 @@ class GarfieldField(Field):
         positions = (positions + 2.0) / 4.0
 
         xs = [e(positions.view(-1, 3)) for e in self.enc_list]
+        # print(f"Encoding outputs: {[x.shape for x in xs]}")
         x = torch.concat(xs, dim=-1)
         hash = x.view(*ray_samples.frustums.shape, -1)
         return hash

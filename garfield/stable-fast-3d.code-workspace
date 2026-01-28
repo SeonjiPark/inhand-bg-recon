@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../stable-fast-3d"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../FusionSense"
+		}
+	],
+	"settings": {}
+}

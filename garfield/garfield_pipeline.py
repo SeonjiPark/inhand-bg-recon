@@ -32,6 +32,14 @@ class GarfieldPipelineConfig(VanillaPipelineConfig):
     max_grouping_scale: float = 2.0
     num_rays_per_image: int = 256
     normalize_grouping_scale: bool = True
+    train_split_fraction: float = 0.1
+    max_num_iterations: int = 30000
+    """Maximum number of training iterations. Used for progressive training scheduling."""
+
+    def __post_init__(self):
+        """Set train_split_fraction in dataparser if not already set."""
+        if hasattr(self.datamanager, 'dataparser') and self.datamanager.dataparser is not None:
+            self.datamanager.dataparser.train_split_fraction = self.train_split_fraction
 
 
 class GarfieldPipeline(VanillaPipeline):
@@ -49,6 +57,9 @@ class GarfieldPipeline(VanillaPipeline):
         grad_scaler: typing.Optional[GradScaler] = None,
     ):
         config.model.max_grouping_scale = config.max_grouping_scale
+        # Set train_split_fraction in dataparser from pipeline config
+        if hasattr(config.datamanager, 'dataparser') and config.datamanager.dataparser is not None:
+            config.datamanager.dataparser.train_split_fraction = config.train_split_fraction
         super().__init__(
             config,
             device,
@@ -63,7 +74,8 @@ class GarfieldPipeline(VanillaPipeline):
             self._training_start_time = time.time()
             self._max_gpu_memory_mb = 0.0
             self._results_saved = False
-            self._max_num_iterations = None  # Will be set when we know it
+            # Use max_num_iterations from config, or try to get from saved config.yml
+            self._max_num_iterations = config.max_num_iterations
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
             
@@ -80,10 +92,10 @@ class GarfieldPipeline(VanillaPipeline):
             current_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)  # Convert to MB
             self._max_gpu_memory_mb = max(self._max_gpu_memory_mb, current_memory_mb)
         
-        # Try to get max_num_iterations from config if available
-        # This is a workaround since we don't have direct access to TrainerConfig
-        if hasattr(self, '_training_start_time') and self._max_num_iterations is None:
-            # Try to find max_num_iterations from saved config.yml
+        # Try to get max_num_iterations from saved config.yml if not already set
+        # This overrides the default from pipeline config if available
+        if hasattr(self, '_training_start_time') and self._max_num_iterations == self.config.max_num_iterations:
+            # Try to find max_num_iterations from saved config.yml (from TrainerConfig)
             try:
                 outputs_dir = Path("outputs")
                 if outputs_dir.exists():
@@ -91,9 +103,9 @@ class GarfieldPipeline(VanillaPipeline):
                     if config_files:
                         config_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
                         with open(config_files[0], 'r') as f:
-                            config = yaml.safe_load(f)
-                            if 'max_num_iterations' in config:
-                                self._max_num_iterations = config['max_num_iterations']
+                            saved_config = yaml.safe_load(f)
+                            if 'max_num_iterations' in saved_config:
+                                self._max_num_iterations = saved_config['max_num_iterations']
             except:
                 pass
         
@@ -130,6 +142,14 @@ class GarfieldPipeline(VanillaPipeline):
         if step >= self.config.start_grouping_step:
             # also set the grouping info in the batch; in-place operation
             self.datamanager.next_group(ray_bundle, batch)
+
+        # Add step and max_num_iterations to metadata for progressive training
+        if not hasattr(ray_bundle, "metadata") or ray_bundle.metadata is None:
+            ray_bundle.metadata = {}
+        ray_bundle.metadata["step"] = step
+        # Always set max_num_iterations (from config or fallback to default)
+        max_iter = self._max_num_iterations if self._max_num_iterations is not None else self.config.max_num_iterations
+        ray_bundle.metadata["max_num_iterations"] = max_iter
 
         model_outputs = self._model(
             ray_bundle
